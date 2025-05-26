@@ -11,4 +11,4 @@ function checkUser() {
     return false;
 }
 
-let unusedVariable = "これは使われていない"; // 未使用変数
+let unusedVariable = "これは使われていない";
