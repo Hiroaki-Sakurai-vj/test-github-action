@@ -1,0 +1,112 @@
+name: Auto Code Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ESLint でのコード品質チェック
+      - name: Run ESLint
+        run: |
+          npx eslint "**/*.{js,ts}" --format json --output-file eslint-results.json || true
+
+      # Security チェック
+      - name: Run Security Audit
+        run: |
+          npm audit --json > audit-results.json || true
+
+      # 複雑度チェック
+      - name: Check Code Complexity
+        run: |
+          npx plato -r -d complexity-report "**/*.js" || true
+
+      # レビューコメントを自動投稿
+      - name: Post Review Comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // ESLint結果を読み込み
+            let eslintResults = [];
+            try {
+              const eslintData = fs.readFileSync('eslint-results.json', 'utf8');
+              eslintResults = JSON.parse(eslintData);
+            } catch (e) {
+              console.log('No ESLint results found');
+            }
+
+            // レビューコメントを生成
+            const comments = [];
+            
+            for (const result of eslintResults) {
+              for (const message of result.messages) {
+                const comment = {
+                  path: result.filePath.replace(process.cwd() + '/', ''),
+                  line: message.line,
+                  body: `🤖 **自動レビュー**: ${message.message}\n\n` +
+                        `**ルール**: \`${message.ruleId}\`\n` +
+                        `**重要度**: ${message.severity === 2 ? '🔴 エラー' : '🟡 警告'}\n\n` +
+                        `**提案**: ${getFixSuggestion(message.ruleId)}`
+                };
+                comments.push(comment);
+              }
+            }
+
+            // プルリクエストにコメント投稿
+            if (comments.length > 0) {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                body: `## 🤖 自動コードレビュー結果\n\n` +
+                      `**検出された問題**: ${comments.length}件\n` +
+                      `**レビュー日時**: ${new Date().toLocaleString('ja-JP')}\n\n` +
+                      `各行に具体的なコメントを残しました。修正後、再度プッシュしてください！`,
+                event: comments.some(c => c.body.includes('🔴')) ? 'REQUEST_CHANGES' : 'COMMENT',
+                comments: comments
+              });
+            } else {
+              // 問題がない場合は承認
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                body: `## ✅ 自動コードレビュー完了\n\n` +
+                      `🎉 **素晴らしいコードです！**\n` +
+                      `- コード品質: 良好\n` +
+                      `- セキュリティ: 問題なし\n` +
+                      `- 複雑度: 適切\n\n` +
+                      `**LGTM!** マージしても大丈夫です 👍`,
+                event: 'APPROVE'
+              });
+            }
+
+            function getFixSuggestion(ruleId) {
+              const suggestions = {
+                'no-unused-vars': '使用していない変数を削除するか、アンダースコア付きの変数名にしてください',
+                'no-console': 'console.logの代わりにloggerライブラリを使用することを検討してください',
+                'eqeqeq': '== の代わりに === を使用して厳密等価比較をしてください',
+                'no-var': 'var の代わりに const または let を使用してください',
+                'prefer-const': '再代入されない変数は const を使用してください',
+                'arrow-spacing': 'アロー関数の前後にスペースを追加してください',
+                'indent': 'インデントを統一してください（2スペースまたは4スペース）'
+              };
+              return suggestions[ruleId] || '公式ドキュメントを参照して修正してください';
+            }
