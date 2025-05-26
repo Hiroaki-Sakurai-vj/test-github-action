@@ -35,10 +35,15 @@ jobs:
         run: |
           npm audit --json > audit-results.json || true
 
-      # 複雑度チェック
+      # 複雑度チェック（src配下のみ対象）
       - name: Check Code Complexity
         run: |
-          npx plato -r -d complexity-report "**/*.js" || true
+          mkdir -p src
+          if [ -d "src" ] && [ "$(find src -name '*.js' -type f | wc -l)" -gt 0 ]; then
+            npx plato -r -d complexity-report "src/**/*.js" || true
+          else
+            echo "No JS files found in src directory, skipping complexity check"
+          fi
 
       # レビューコメントを自動投稿
       - name: Post Review Comments
