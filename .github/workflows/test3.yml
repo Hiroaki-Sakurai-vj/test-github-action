@@ -1,0 +1,8 @@
+name: VJ-presentation
+on: push
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "こんにちはVJプレゼンテーション中です"
+      
